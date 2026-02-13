@@ -1,83 +1,77 @@
-﻿# Windows 开发环境搭建
+# Windows 开发环境搭建
 
 ## 前置条件
-- Node.js：建议 `>=18`
-- npm：建议 `>=9`
+- Node.js：`>=18`（已验证 Node `v22.13.1` 可运行）
+- npm：`>=9`（已验证 npm `10.9.2` 可运行）
 - PowerShell：`5.1` 或 `7+`
-- Git：建议 `>=2.40`
-- Java：TODO: confirm（当前仓库未发现 Spring 启动脚本）
+- Git：`>=2.40`（建议）
 
-## One-command dev（best available）
+## One-command dev（后端微服务）
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts/dev.ps1
+npm install --prefix apps/backend
+powershell -ExecutionPolicy Bypass -File scripts/dev.ps1 -BackendOnly
 ```
-说明：当前脚本为占位版，只打印将启动的服务与命令。
 
 ## 手动启动（精确命令）
 ```powershell
-npm --prefix apps/mock run dev
-npm --prefix apps/low_code start
-npm --prefix apps/low_code_c run dev
+npm --prefix apps/backend run start:question
+npm --prefix apps/backend run start:answer
+npm --prefix apps/backend run start:gateway
 ```
 
 ## Ports
 | Service | Port | URL |
 |---|---:|---|
-| Mock API (`apps/mock`) | 3001 | `http://localhost:3001` |
-| Next 消费端/BFF (`apps/low_code_c`) | 3000 | `http://localhost:3000` |
-| React 编辑端 (`apps/low_code`) | TODO: 启动日志确认 | `http://localhost:<port>` |
+| API Gateway | 3100 | `http://localhost:3100` |
+| Question Service | 3101 | `http://localhost:3101` |
+| Answer Service | 3102 | `http://localhost:3102` |
 
 ## Env
 | Name | Example | Meaning | Required |
 |---|---|---|---|
-| `NODE_ENV` | `development` | Node 运行模式 | Optional |
-| `PORT` | `3000` / `3001` | 各服务监听端口 | Optional |
-| `API_BASE_URL` | `http://localhost:3001` | 前端请求后端地址 | Optional |
+| `GATEWAY_PORT` | `3100` | 网关监听端口 | Optional |
+| `QUESTION_SERVICE_PORT` | `3101` | 问卷服务监听端口 | Optional |
+| `ANSWER_SERVICE_PORT` | `3102` | 答案服务监听端口 | Optional |
+| `QUESTION_SERVICE_URL` | `http://localhost:3101` | 网关/答案服务访问问卷服务地址 | Optional |
+| `ANSWER_SERVICE_URL` | `http://localhost:3102` | 网关访问答案服务地址 | Optional |
 
 ## Verification Commands (Windows PowerShell)
 ```powershell
-curl "http://localhost:3001/api/question/list"
-netstat -ano | findstr :3000
-netstat -ano | findstr :3001
-Get-Process node | Select-Object Id,ProcessName
+Invoke-RestMethod http://localhost:3100/health | ConvertTo-Json
+Invoke-RestMethod http://localhost:3101/health | ConvertTo-Json
+Invoke-RestMethod http://localhost:3102/health | ConvertTo-Json
+Invoke-RestMethod http://localhost:3100/api/question/list | ConvertTo-Json -Depth 6
+Invoke-RestMethod -Method Post -Uri http://localhost:3100/api/answer -ContentType "application/json" -Body '{"questionId":"1001","answerList":[{"componentId":"c1","value":"hello"}]}' | ConvertTo-Json -Depth 6
+Invoke-RestMethod http://localhost:3100/api/answer/list | ConvertTo-Json -Depth 6
 ```
 
 ## Troubleshooting
-1. 3000/3001 端口冲突
-- 检查：`netstat -ano | findstr :3000` / `:3001`
+1. 脚本可执行但健康检查失败
+- 处理：分别执行 `npm --prefix apps/backend run start:question`、`start:answer`、`start:gateway`，查看具体报错。
+2. `npm install` 失败
+- 处理：`npm cache clean --force` 后重试 `npm install --prefix apps/backend`。
+3. 端口被占用
+- 检查：`netstat -ano | findstr :3100`
 - 处理：`taskkill /PID <PID> /F`
-2. 依赖安装慢或失败
-- 清理：`npm cache clean --force`
-- 重试：`npm --prefix apps/mock install`
-3. PowerShell 执行策略报错
-- 临时运行：`powershell -ExecutionPolicy Bypass -File scripts/dev.ps1`
-4. curl 调用失败（连接拒绝）
-- 检查 mock 终端是否在运行
-- 重启：`npm --prefix apps/mock run dev`
-5. 前端页面空白或请求 404
-- 检查：`Get-Content apps/low_code_c/package.json -TotalCount 120`
-- 确认：`npm --prefix apps/low_code_c run dev` 正常启动
+4. 提交答案返回 `invalid questionId`
+- 检查 question 服务：`Invoke-RestMethod http://localhost:3101/api/question/1001`
+5. `powershell` 执行策略限制
+- 处理：`powershell -ExecutionPolicy Bypass -File scripts/dev.ps1 -BackendOnly`
 
 ## Reset / Clean
 ```powershell
-Remove-Item -Recurse -Force apps/mock/node_modules
-Remove-Item -Recurse -Force apps/low_code/node_modules
-Remove-Item -Recurse -Force apps/low_code_c/node_modules
-npm --prefix apps/mock install
-npm --prefix apps/low_code install
-npm --prefix apps/low_code_c install
+taskkill /F /IM node.exe
+Remove-Item -Recurse -Force apps/backend/node_modules
+npm install --prefix apps/backend
 ```
 
 ## Trade-offs
-1. 先用 npm（非 pnpm workspace）
-- 收益：上手门槛低。
-- 代价：跨应用依赖去重能力较弱。
-2. 手动三终端启动
-- 收益：问题定位更直接。
-- 代价：操作成本高，易漏步骤。
-3. 脚本先占位后完善
-- 收益：快速建立协作入口。
-- 代价：当前还不具备自动健康检查。
-4. 环境变量最小化
-- 收益：新同学快速跑通。
-- 代价：后续环境分层（dev/test/prod）需补齐。
+1. 使用单仓库多进程替代容器编排
+- 收益：本地调试成本最低。
+- 代价：生产环境一致性不足。
+2. 不引入服务注册中心
+- 收益：结构更小，上手更快。
+- 代价：服务地址靠环境变量管理。
+3. 先保证 REST 主链路
+- 收益：优先完成面试可演示能力。
+- 代价：监控、鉴权、重试策略后补。

@@ -1,27 +1,27 @@
-﻿# 架构说明（最小版）
+# 架构说明（微服务版）
 
 ## 文本架构图
 ```text
-Browser
-  |\
-  | \---> apps/low_code (React 编辑端)
-  |\
-  | \---> apps/low_code_c (Next.js 消费端 + BFF API)
-               |
-               v
-          apps/mock (Koa Mock API)
+Client
+  |
+  v
+API Gateway (3100)
+  |                         REST
+  +------> Question Service (3101)
+  |
+  +------> Answer Service (3102) ----REST----> Question Service (3101)
 ```
 
 ## 请求流
-1. 浏览器访问 `apps/low_code_c` 页面。
-2. 页面优先请求 Next.js API/BFF（`/api/bff/...`）。
-3. BFF 再调用 `apps/mock` 对应接口并整理响应。
-4. 前端根据统一结构渲染页面。
+1. 客户端调用网关 `GET /api/question/list` 或 `POST /api/answer`。
+2. 网关把请求转发给对应微服务。
+3. `answer-service` 在写入答案前，通过 REST 调用 `question-service` 校验 `questionId`。
+4. 返回统一响应结构给客户端。
 
 ## 边界与责任
-- `apps/low_code`：问卷编辑、组件配置、管理页面。
-- `apps/low_code_c`：问卷展示、SSR/BFF、前后端中转。
-- `apps/mock`：提供开发期稳定假数据接口，不承载业务真实持久化。
+- `gateway`：统一入口、路由转发、故障隔离（502/503）。
+- `question-service`：问卷查询与详情。
+- `answer-service`：答案提交与查询，并依赖问卷服务做业务校验。
 
 ## 最小验收
-- 可解释一次完整链路：页面 -> BFF -> Mock -> 页面渲染。
+- 可解释并演示链路：Client -> Gateway -> Answer Service -> Question Service -> Gateway -> Client。

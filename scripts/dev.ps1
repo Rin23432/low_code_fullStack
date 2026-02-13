@@ -1,13 +1,49 @@
-﻿# 占位脚本：仅打印将启动的服务，不实际执行启动。
-# TODO: 后续增加并行启动与健康检查。
-
-$services = @(
-  @{ Name = 'apps/mock'; Command = 'npm run dev' },
-  @{ Name = 'apps/low_code'; Command = 'npm start' },
-  @{ Name = 'apps/low_code_c'; Command = 'npm run dev' }
+param(
+  [switch]$BackendOnly
 )
 
-Write-Host 'Planned services to start:' -ForegroundColor Cyan
-foreach ($svc in $services) {
-  Write-Host ("- {0} -> {1}" -f $svc.Name, $svc.Command)
+$root = Split-Path -Parent $PSScriptRoot
+
+function Start-ServiceWindow {
+  param(
+    [string]$Name,
+    [string]$Workdir,
+    [string]$Command
+  )
+
+  Write-Host ("Starting {0}: {1}" -f $Name, $Command) -ForegroundColor Cyan
+  Start-Process powershell -ArgumentList @(
+    "-NoExit",
+    "-Command",
+    "Set-Location '$Workdir'; $Command"
+  ) | Out-Null
+}
+
+# Backend microservices
+Start-ServiceWindow -Name "question-service" -Workdir "$root\apps\backend" -Command "npm run start:question"
+Start-ServiceWindow -Name "answer-service" -Workdir "$root\apps\backend" -Command "npm run start:answer"
+Start-ServiceWindow -Name "gateway" -Workdir "$root\apps\backend" -Command "npm run start:gateway"
+
+if (-not $BackendOnly) {
+  Start-ServiceWindow -Name "mock" -Workdir "$root\apps\mock" -Command "npm run dev"
+  Start-ServiceWindow -Name "low_code" -Workdir "$root\apps\low_code" -Command "npm start"
+  Start-ServiceWindow -Name "low_code_c" -Workdir "$root\apps\low_code_c" -Command "npm run dev"
+}
+
+Write-Host "Waiting for backend health checks..." -ForegroundColor Yellow
+Start-Sleep -Seconds 4
+
+$checks = @(
+  "http://localhost:3100/health",
+  "http://localhost:3101/health",
+  "http://localhost:3102/health"
+)
+
+foreach ($url in $checks) {
+  try {
+    $result = Invoke-RestMethod -Method Get -Uri $url -TimeoutSec 5
+    Write-Host ("OK {0} -> {1}" -f $url, ($result | ConvertTo-Json -Compress)) -ForegroundColor Green
+  } catch {
+    Write-Host ("FAIL {0} -> {1}" -f $url, $_.Exception.Message) -ForegroundColor Red
+  }
 }
